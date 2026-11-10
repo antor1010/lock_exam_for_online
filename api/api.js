@@ -16,6 +16,8 @@ const memR = ([c, k, ...a]) => {
     case "LPUSH": { const x = l(); x.unshift(a[0]); mem.set(k, x); return x.length; }
     case "LTRIM": mem.set(k, l().slice(a[0], a[1] + 1)); return "OK";
     case "LRANGE": return l().slice(a[0], a[1] + 1);
+    case "LSET": { const x = l(); x[a[0]] = a[1]; mem.set(k, x); return "OK"; }
+    case "LREM": { const x = l(); const i = x.indexOf(a[1]); if (i >= 0) x.splice(i, 1); mem.set(k, x); return i >= 0 ? 1 : 0; }
     case "SADD": { const x = l(); if (!x.includes(a[0])) x.push(a[0]); mem.set(k, x); return 1; }
     case "SMEMBERS": return l();
   }
@@ -106,6 +108,29 @@ module.exports = async (req, res) => {
       const out = [];
       for (const id of (await R("SMEMBERS", "snapusers")) || []) { const x = J(await R("GET", "snap:" + id)); if (x) out.push({ id, ...x }); }
       return res.json({ snaps: out });
+    }
+    if (a === "deleteSub") {
+      const raw = (await R("LRANGE", "subs", 0, 99)) || [];
+      const i = raw.findIndex((x) => { const s = J(x); return s && s.time === b.time && s.id === b.id; });
+      if (i >= 0) {
+        for (const id of J(raw[i]).imgs || []) await R("DEL", "img:" + id);
+        await R("LSET", "subs", i, "__del__");
+        await R("LREM", "subs", 1, "__del__");
+      }
+      return res.json({ ok: 1 });
+    }
+    if (a === "clearSubs") {
+      for (const x of (await R("LRANGE", "subs", 0, 999)) || []) {
+        const s = J(x);
+        for (const id of (s && s.imgs) || []) await R("DEL", "img:" + id);
+      }
+      await R("DEL", "subs");
+      return res.json({ ok: 1 });
+    }
+    if (a === "clearSnaps") {
+      for (const id of (await R("SMEMBERS", "snapusers")) || []) await R("DEL", "snap:" + id);
+      await R("DEL", "snapusers");
+      return res.json({ ok: 1 });
     }
     if (a === "getImg") return res.json({ img: await R("GET", "img:" + b.id) });
     res.status(404).json({ error: "unknown" });

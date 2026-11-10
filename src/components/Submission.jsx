@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { api } from "../api.js";
 
-export default function Submission({ s }) {
+export default function Submission({ s, onDelete }) {
   const [imgs, setImgs] = useState(null);
 
   const load = async () => {
@@ -11,7 +11,8 @@ export default function Submission({ s }) {
 
   return (
     <div className="card">
-      <b>{s.name}</b> ({s.id}) — MCQ: {s.score}/{s.total} <span className="mut">{s.time}</span>
+      <b>{s.name}</b> ({s.id}) — MCQ: {s.score}/{s.total} <span className="mut">{s.time}</span>{" "}
+      <button className="red" onClick={onDelete}>🗑 মুছুন</button>
       <br />
       {s.imgs.length === 0 ? (
         <span className="mut">ছবি নেই</span>

@@ -121,7 +121,11 @@ export default function Admin() {
       </div>
 
       <div className="card">
-        <h3>📷 শিক্ষার্থীদের ক্যামেরা (প্রতি ~২০ সেকেন্ডে আপডেট)</h3>
+        <h3>📷 শিক্ষার্থীদের ক্যামেরা (প্রতি ~২০ সেকেন্ডে আপডেট){" "}
+          {snaps.length > 0 && (
+            <button className="g" onClick={async () => { setSnaps([]); await api("clearSnaps"); }}>পরিষ্কার করুন</button>
+          )}
+        </h3>
         {snaps.length ? snaps.map((s) => (
           <div key={s.id} style={{ display: "inline-block", margin: 6, textAlign: "center" }}>
             <img className="snap" src={s.img} alt="" /><br />
@@ -142,9 +146,22 @@ export default function Admin() {
       </div>
 
       <div className="card">
-        <h3>📥 জমা দেওয়া উত্তর</h3>
+        <h3>📥 জমা দেওয়া উত্তর{" "}
+          {subs.length > 0 && (
+            <button className="red" onClick={async () => {
+              if (!confirm("সব জমা দেওয়া উত্তর ও ছবি মুছে যাবে। নিশ্চিত?")) return;
+              setSubs([]); await api("clearSubs");
+            }}>🗑 সব মুছুন</button>
+          )}
+        </h3>
         {subs.length
-          ? subs.map((s, i) => <Submission key={i} s={s} />)
+          ? subs.map((s, i) => (
+            <Submission key={s.id + s.time} s={s} onDelete={async () => {
+              if (!confirm("এই জমা দেওয়া উত্তর (ছবিসহ) মুছে ফেলবেন?")) return;
+              setSubs((x) => x.filter((y) => y !== s));
+              await api("deleteSub", { id: s.id, time: s.time });
+            }} />
+          ))
           : <span className="mut">এখনো কেউ জমা দেয়নি</span>}
       </div>
     </div>
