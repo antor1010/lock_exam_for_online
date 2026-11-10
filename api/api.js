@@ -1,0 +1,113 @@
+const crypto = require("crypto");
+const E = process.env;
+const ADMIN = { id: E.ADMIN_ID || "antor1010", pw: E.ADMIN_PW || "antor1010" };
+const STU = E.STUDENTS ? JSON.parse(E.STUDENTS) : { student09: { pw: "123", name: "শিক্ষার্থী" } };
+const SECRET = E.SECRET || "change-this-secret";
+const sign = (s) => crypto.createHmac("sha256", SECRET).update(s).digest("hex").slice(0, 32);
+const KV_URL = E.KV_REST_API_URL || E.UPSTASH_REDIS_REST_URL;
+const KV_TOKEN = E.KV_REST_API_TOKEN || E.UPSTASH_REDIS_REST_TOKEN;
+const mem = (globalThis.__examMem ||= new Map());
+const memR = ([c, k, ...a]) => {
+  const l = () => mem.get(k) || [];
+  switch (c) {
+    case "GET": return mem.has(k) ? mem.get(k) : null;
+    case "SET": mem.set(k, a[0]); return "OK";
+    case "DEL": mem.delete(k); return 1;
+    case "LPUSH": { const x = l(); x.unshift(a[0]); mem.set(k, x); return x.length; }
+    case "LTRIM": mem.set(k, l().slice(a[0], a[1] + 1)); return "OK";
+    case "LRANGE": return l().slice(a[0], a[1] + 1);
+    case "SADD": { const x = l(); if (!x.includes(a[0])) x.push(a[0]); mem.set(k, x); return 1; }
+    case "SMEMBERS": return l();
+  }
+};
+const R = async (...cmd) => {
+  if (!KV_URL) {
+    if (E.VERCEL) throw new Error("ডাটাবেস (Upstash Redis) কানেক্ট করা নেই — Vercel Storage থেকে Connect করুন");
+    return memR(cmd); // লোকাল টেস্টের জন্য মেমোরি (সার্ভার রিস্টার্টে মুছে যায়)
+  }
+  return (await (await fetch(KV_URL, { method: "POST", headers: { Authorization: "Bearer " + KV_TOKEN }, body: JSON.stringify(cmd) })).json()).result;
+};
+const J = (v) => { try { return JSON.parse(v); } catch (e) { return null; } };
+
+function auth(req) {
+  const [role, id, sig] = (req.headers.authorization || "").split("|");
+  if (!role || !id || sig !== sign(role + "|" + id)) return null;
+  return { role, id, name: role === "admin" ? "শিক্ষক" : (STU[id] || {}).name || id };
+}
+
+async function wa(img, cap) {
+  if (!E.WA_TOKEN || !E.WA_PHONE_ID) return false;
+  const f = new FormData();
+  f.append("messaging_product", "whatsapp");
+  f.append("type", "image/jpeg");
+  f.append("file", new Blob([Buffer.from(img.split(",")[1], "base64")], { type: "image/jpeg" }), "answer.jpg");
+  const H = { Authorization: "Bearer " + E.WA_TOKEN };
+  const u = await (await fetch(`https://graph.facebook.com/v20.0/${E.WA_PHONE_ID}/media`, { method: "POST", headers: H, body: f })).json();
+  if (!u.id) return false;
+  const m = await (await fetch(`https://graph.facebook.com/v20.0/${E.WA_PHONE_ID}/messages`, {
+    method: "POST", headers: { ...H, "Content-Type": "application/json" },
+    body: JSON.stringify({ messaging_product: "whatsapp", to: E.WA_TO || "916297751533", type: "image", image: { id: u.id, caption: cap } }),
+  })).json();
+  return !!m.messages;
+}
+
+module.exports = async (req, res) => {
+  const a = req.query.a, b = req.body || {};
+  try {
+    if (a === "login") {
+      const ok = b.role === "admin" ? b.id === ADMIN.id && b.pw === ADMIN.pw : STU[b.id] && STU[b.id].pw === b.pw;
+      if (!ok) return res.status(401).json({ error: "আইডি বা পাসওয়ার্ড ভুল" });
+      const role = b.role === "admin" ? "admin" : "student";
+      return res.json({ token: role + "|" + b.id + "|" + sign(role + "|" + b.id), name: role === "admin" ? "শিক্ষক" : STU[b.id].name, role, id: b.id });
+    }
+    const u = auth(req);
+    if (!u) return res.status(401).json({ error: "লগইন করুন" });
+    const exam = J(await R("GET", "exam")) || { title: "ক্লাস টেস্ট", mins: 30, mcq: [], cq: [] };
+
+    if (a === "getExam") {
+      if (u.role === "student") exam.mcq = exam.mcq.map(({ q, o }) => ({ q, o }));
+      return res.json({ exam });
+    }
+    if (a === "alert" && u.role === "student") {
+      await R("LPUSH", "alerts", JSON.stringify({ who: u.name + " (" + u.id + ")", msg: b.msg, time: new Date().toLocaleTimeString("bn-BD", { timeZone: "Asia/Kolkata" }) }));
+      await R("LTRIM", "alerts", 0, 99);
+      return res.json({ ok: 1 });
+    }
+    if (a === "sendImg" && u.role === "student") {
+      const id = crypto.randomUUID();
+      await R("SET", "img:" + id, b.img, "EX", 60 * 60 * 24 * 30);
+      const sent = await wa(b.img, `${u.name} (${u.id}) — CQ উত্তরের ছবি`);
+      return res.json({ id, sent });
+    }
+    if (a === "getQImg") return res.json({ img: await R("GET", "qimg:" + b.id) });
+    if (a === "snap" && u.role === "student") {
+      await R("SET", "snap:" + u.id, JSON.stringify({ img: b.img, name: u.name, time: new Date().toLocaleTimeString("bn-BD", { timeZone: "Asia/Kolkata" }) }));
+      await R("SADD", "snapusers", u.id);
+      return res.json({ ok: 1 });
+    }
+    if (a === "submit" && u.role === "student") {
+      let score = 0;
+      exam.mcq.forEach((m, i) => { if (b.ans && b.ans[i] === m.a) score++; });
+      const sub = { id: u.id, name: u.name, score, total: exam.mcq.length, imgs: b.imgs || [], time: new Date().toLocaleString("bn-BD", { timeZone: "Asia/Kolkata" }) };
+      await R("LPUSH", "subs", JSON.stringify(sub));
+      return res.json({ score, total: sub.total });
+    }
+    if (u.role !== "admin") return res.status(403).json({ error: "অনুমতি নেই" });
+    if (a === "qimg") {
+      const id = crypto.randomUUID();
+      await R("SET", "qimg:" + id, b.img);
+      return res.json({ id });
+    }
+    if (a === "saveExam") { await R("SET", "exam", JSON.stringify(b.exam)); return res.json({ ok: 1 }); }
+    if (a === "getAlerts") return res.json({ alerts: ((await R("LRANGE", "alerts", 0, 49)) || []).map(J) });
+    if (a === "clearAlerts") { await R("DEL", "alerts"); return res.json({ ok: 1 }); }
+    if (a === "getSubs") return res.json({ subs: ((await R("LRANGE", "subs", 0, 99)) || []).map(J) });
+    if (a === "latestSnaps") {
+      const out = [];
+      for (const id of (await R("SMEMBERS", "snapusers")) || []) { const x = J(await R("GET", "snap:" + id)); if (x) out.push({ id, ...x }); }
+      return res.json({ snaps: out });
+    }
+    if (a === "getImg") return res.json({ img: await R("GET", "img:" + b.id) });
+    res.status(404).json({ error: "unknown" });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+};
