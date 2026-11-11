@@ -67,7 +67,7 @@ module.exports = async (req, res) => {
     const exam = J(await R("GET", "exam")) || { title: "ক্লাস টেস্ট", mins: 30, mcq: [], cq: [] };
 
     if (a === "getExam") {
-      if (u.role === "student") exam.mcq = exam.mcq.map(({ q, o }) => ({ q, o }));
+      if (u.role === "student") exam.mcq = exam.mcq.map(({ q, o, img }) => ({ q, o, img }));
       return res.json({ exam });
     }
     if (a === "alert" && u.role === "student") {
@@ -100,6 +100,7 @@ module.exports = async (req, res) => {
       await R("SET", "qimg:" + id, b.img);
       return res.json({ id });
     }
+    if (a === "delQImg") { if (b.id) await R("DEL", "qimg:" + b.id); return res.json({ ok: 1 }); }
     if (a === "saveExam") { await R("SET", "exam", JSON.stringify(b.exam)); return res.json({ ok: 1 }); }
     if (a === "getAlerts") return res.json({ alerts: ((await R("LRANGE", "alerts", 0, 49)) || []).map(J) });
     if (a === "clearAlerts") { await R("DEL", "alerts"); return res.json({ ok: 1 }); }

@@ -264,6 +264,7 @@ export default function Student() {
             {ex.mcq.length ? ex.mcq.map((q, i) => (
               <div key={i}>
                 <b>{i + 1}. {q.q}</b>
+                {q.img && <QImg id={q.img} />}
                 {q.o.map((o, j) => (
                   <label key={j} className={"opt" + (ans[i] === j ? " on" : "")}>
                     <input type="radio" name={"q" + i} checked={ans[i] === j} onChange={() => pick(i, j)} />

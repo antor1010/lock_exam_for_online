@@ -13,6 +13,8 @@ export default function Admin() {
   const [correct, setCorrect] = useState(0);
   const [cq, setCq] = useState("");
   const [cqImg, setCqImg] = useState("");
+  const [mcqImg, setMcqImg] = useState("");
+  const [mcqFileKey, setMcqFileKey] = useState(0);
   const [fileKey, setFileKey] = useState(0);
   const [msg, setMsg] = useState("");
 
@@ -38,13 +40,25 @@ export default function Admin() {
     setTimeout(() => setMsg(""), 1500);
   };
 
-  const addMcq = () => {
-    if (!q) return;
-    save({ ...ex, mcq: [...ex.mcq, { q, o: opts, a: correct }] });
-    setQ(""); setOpts(["", "", "", ""]);
+  const addMcq = async () => {
+    if (!q && !mcqImg) return;
+    let img;
+    if (mcqImg) {
+      const r = await api("qimg", { img: mcqImg });
+      if (!r.id) { setMsg("❌ ছবি আপলোড হয়নি"); return; }
+      img = r.id;
+    }
+    await save({ ...ex, mcq: [...ex.mcq, { q, o: opts, a: correct, img }] });
+    setQ(""); setOpts(["", "", "", ""]); setMcqImg(""); setMcqFileKey((k) => k + 1);
   };
 
-  const pickCqImg = (file) => {
+  const removeItem = async (type, i) => {
+    const item = ex[type][i];
+    await save({ ...ex, [type]: ex[type].filter((_, j) => j !== i) });
+    if (item && item.img) api("delQImg", { id: item.img });
+  };
+
+  const pickImg = (file, set) => {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
@@ -54,7 +68,7 @@ export default function Admin() {
         const k = Math.min(1, 1000 / im.width);
         cv.width = im.width * k; cv.height = im.height * k;
         cv.getContext("2d").drawImage(im, 0, 0, cv.width, cv.height);
-        setCqImg(cv.toDataURL("image/jpeg", 0.7));
+        set(cv.toDataURL("image/jpeg", 0.7));
       };
       im.src = reader.result;
     };
@@ -84,7 +98,10 @@ export default function Admin() {
 
       <div className="card">
         <h3>✅ MCQ প্রশ্ন যোগ করুন</h3>
-        <input placeholder="প্রশ্ন" value={q} onChange={(e) => setQ(e.target.value)} />
+        <input placeholder="প্রশ্ন (ছবি দিলে লেখা ফাঁকা রাখা যাবে)" value={q} onChange={(e) => setQ(e.target.value)} />
+        <p className="mut">🖼 প্রশ্নের ছবি (ঐচ্ছিক):</p>
+        <input key={mcqFileKey} type="file" accept="image/*" onChange={(e) => pickImg(e.target.files[0], setMcqImg)} />
+        {mcqImg && <img className="qimg" src={mcqImg} alt="" />}
         {opts.map((v, i) => (
           <input key={i} placeholder={"অপশন " + L[i]} value={v}
             onChange={(e) => setOpts(opts.map((x, j) => (j === i ? e.target.value : x)))} />
@@ -99,7 +116,7 @@ export default function Admin() {
         <h3>✍️ CQ প্রশ্ন যোগ করুন</h3>
         <textarea rows="3" placeholder="CQ প্রশ্ন (লেখা)" value={cq} onChange={(e) => setCq(e.target.value)} />
         <p className="mut">🖼 অথবা প্রশ্নের ছবি আপলোড করুন (লেখার সাথেও দেওয়া যাবে):</p>
-        <input key={fileKey} type="file" accept="image/*" onChange={(e) => pickCqImg(e.target.files[0])} />
+        <input key={fileKey} type="file" accept="image/*" onChange={(e) => pickImg(e.target.files[0], setCqImg)} />
         {cqImg && <img className="qimg" src={cqImg} alt="" />}
         <button onClick={addCq}>+ CQ যোগ করুন</button>
       </div>
@@ -108,14 +125,14 @@ export default function Admin() {
         <h3>📋 আপলোড করা প্রশ্ন ({ex.mcq.length} MCQ, {ex.cq.length} CQ)</h3>
         {ex.mcq.map((m, i) => (
           <div className="alert ok" key={"m" + i}>
-            <span className="tag">MCQ</span>{m.q}{" "}
-            <button className="red" onClick={() => save({ ...ex, mcq: ex.mcq.filter((_, j) => j !== i) })}>মুছুন</button>
+            <span className="tag">MCQ</span>{m.q}{m.img && <QImg id={m.img} />}{" "}
+            <button className="red" onClick={() => removeItem("mcq", i)}>মুছুন</button>
           </div>
         ))}
         {ex.cq.map((m, i) => (
           <div className="alert pr" key={"c" + i}>
             <span className="tag">CQ</span>{m.t ?? m}{m.img && <QImg id={m.img} />}{" "}
-            <button className="red" onClick={() => save({ ...ex, cq: ex.cq.filter((_, j) => j !== i) })}>মুছুন</button>
+            <button className="red" onClick={() => removeItem("cq", i)}>মুছুন</button>
           </div>
         ))}
       </div>
