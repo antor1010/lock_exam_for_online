@@ -67,8 +67,15 @@ module.exports = async (req, res) => {
     const exam = J(await R("GET", "exam")) || { title: "ক্লাস টেস্ট", mins: 30, mcq: [], cq: [] };
 
     if (a === "getExam") {
-      if (u.role === "student") exam.mcq = exam.mcq.map(({ q, o, img }) => ({ q, o, img }));
-      return res.json({ exam });
+      if (u.role === "student") exam.mcq = exam.mcq.map(({ q, o, img, m }) => ({ q, o, img, m }));
+      return res.json({ exam, now: Date.now() });
+    }
+    if (a === "start" && u.role === "student") {
+      // শুরুর সময় সার্ভারে সেভ — রিফ্রেশ করলেও টাইমার রিসেট হবে না
+      const k = "start:" + (exam.ver || 0) + ":" + u.id;
+      let t = +(await R("GET", k));
+      if (!t) { t = Date.now(); await R("SET", k, String(t), "EX", 60 * 60 * 24); }
+      return res.json({ start: t, now: Date.now(), mins: exam.mins });
     }
     if (a === "alert" && u.role === "student") {
       await R("LPUSH", "alerts", JSON.stringify({ who: u.name + " (" + u.id + ")", msg: b.msg, time: new Date().toLocaleTimeString("bn-BD", { timeZone: "Asia/Kolkata" }) }));
@@ -88,11 +95,18 @@ module.exports = async (req, res) => {
       return res.json({ ok: 1 });
     }
     if (a === "submit" && u.role === "student") {
-      let score = 0;
-      exam.mcq.forEach((m, i) => { if (b.ans && b.ans[i] === m.a) score++; });
-      const sub = { id: u.id, name: u.name, score, total: exam.mcq.length, imgs: b.imgs || [], time: new Date().toLocaleString("bn-BD", { timeZone: "Asia/Kolkata" }) };
+      const r2 = (n) => Math.round(n * 100) / 100;
+      let score = 0, total = 0;
+      exam.mcq.forEach((m, i) => {
+        const w = m.m === undefined || m.m === "" ? 1 : +m.m || 0;
+        total += w;
+        if (b.ans && b.ans[i] === m.a) score += w;
+      });
+      score = r2(score); total = r2(total);
+      const cqTotal = r2(exam.cq.reduce((t, c) => t + (+(c && c.m) || 0), 0));
+      const sub = { id: u.id, name: u.name, score, total, cqTotal, imgs: b.imgs || [], time: new Date().toLocaleString("bn-BD", { timeZone: "Asia/Kolkata" }) };
       await R("LPUSH", "subs", JSON.stringify(sub));
-      return res.json({ score, total: sub.total });
+      return res.json({ score, total, cqTotal });
     }
     if (u.role !== "admin") return res.status(403).json({ error: "অনুমতি নেই" });
     if (a === "qimg") {
@@ -101,10 +115,20 @@ module.exports = async (req, res) => {
       return res.json({ id });
     }
     if (a === "delQImg") { if (b.id) await R("DEL", "qimg:" + b.id); return res.json({ ok: 1 }); }
-    if (a === "saveExam") { await R("SET", "exam", JSON.stringify(b.exam)); return res.json({ ok: 1 }); }
+    if (a === "saveExam") { b.exam.mins = Math.max(1, +b.exam.mins || 30); await R("SET", "exam", JSON.stringify(b.exam)); return res.json({ ok: 1 }); }
     if (a === "getAlerts") return res.json({ alerts: ((await R("LRANGE", "alerts", 0, 49)) || []).map(J) });
     if (a === "clearAlerts") { await R("DEL", "alerts"); return res.json({ ok: 1 }); }
-    if (a === "getSubs") return res.json({ subs: ((await R("LRANGE", "subs", 0, 99)) || []).map(J) });
+    if (a === "getSubs") {
+      const g = J(await R("GET", "grades")) || {};
+      const subs = ((await R("LRANGE", "subs", 0, 99)) || []).map(J).filter(Boolean).map((s) => ({ ...s, cqScore: g[s.id + "|" + s.time] }));
+      return res.json({ subs });
+    }
+    if (a === "grade") {
+      const g = J(await R("GET", "grades")) || {};
+      g[b.id + "|" + b.time] = Math.max(0, +b.cq || 0);
+      await R("SET", "grades", JSON.stringify(g));
+      return res.json({ ok: 1 });
+    }
     if (a === "latestSnaps") {
       const out = [];
       for (const id of (await R("SMEMBERS", "snapusers")) || []) { const x = J(await R("GET", "snap:" + id)); if (x) out.push({ id, ...x }); }
@@ -125,7 +149,7 @@ module.exports = async (req, res) => {
         const s = J(x);
         for (const id of (s && s.imgs) || []) await R("DEL", "img:" + id);
       }
-      await R("DEL", "subs");
+      await R("DEL", "subs"); await R("DEL", "grades");
       return res.json({ ok: 1 });
     }
     if (a === "clearSnaps") {

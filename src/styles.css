@@ -24,6 +24,8 @@ input,textarea,select{width:100%;padding:10px;margin:5px 0;border-radius:10px;bo
 .opt.on{background:var(--p);color:#fff}
 .opt input{width:auto;margin-right:8px}
 .timer{font-size:24px;font-weight:800}
+.timer.low{color:#dc2626;animation:blink 1s infinite}
+@keyframes blink{50%{opacity:.45}}
 video{width:110px;border-radius:10px;background:#000}
 img.th{width:90px;height:90px;object-fit:cover;border-radius:8px;margin:4px}
 .mut{color:var(--mut);font-size:13px}

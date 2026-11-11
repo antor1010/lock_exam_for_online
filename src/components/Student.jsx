@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, L } from "../api.js";
+import { api, L, mcqMarks, cqMarks } from "../api.js";
 import QImg from "./QImg.jsx";
 
 const MAX_WARN = 3; // এতবার নিয়ম ভাঙলে পরীক্ষা অটো জমা হবে
@@ -31,6 +31,11 @@ export default function Student() {
   const lockRef = useRef(false), warnRef = useRef(0);
   const ignoreRef = useRef(false), awayRef = useRef(0), fsRef = useRef(false);
   const submitRef = useRef(null);
+  const timeRef = useRef({ start: 0, off: 0, mins: 0 }); // সার্ভার-ভিত্তিক টাইমার
+  const calcLeft = () => {
+    const t = timeRef.current;
+    return Math.ceil((t.start + t.mins * 60000 - (Date.now() + t.off)) / 1000);
+  };
 
   const load = () => {
     setLoadErr("");
@@ -45,6 +50,15 @@ export default function Student() {
     goFull(); // ক্লিকের সাথে সাথেই ফুলস্ক্রিন
     try {
       stream.current = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
+      const r = await api("start");
+      if (!r.start) {
+        stream.current.getTracks().forEach((t) => t.stop());
+        exitFull();
+        setErr(r.error || "টাইমার চালু করা যায়নি, আবার চেষ্টা করুন।");
+        return;
+      }
+      timeRef.current = { start: r.start, off: r.now - Date.now(), mins: r.mins };
+      setLeft(calcLeft());
       live.current = true;
       setStep("exam");
     } catch (e) {
@@ -85,8 +99,12 @@ export default function Student() {
   // টাইমার (লক থাকলেও চলতে থাকবে)
   useEffect(() => {
     if (step !== "exam") return;
-    const t = setInterval(() => setLeft((l) => l - 1), 1000);
-    return () => clearInterval(t);
+    const t = setInterval(() => setLeft(calcLeft()), 1000);
+    // শিক্ষক সময় বাড়ালে/কমালে ৩০ সেকেন্ডের মধ্যে আপডেট হবে
+    const sync = setInterval(() => {
+      api("getExam").then((r) => { if (r.exam && r.exam.mins) timeRef.current.mins = r.exam.mins; });
+    }, 30000);
+    return () => { clearInterval(t); clearInterval(sync); };
   }, [step]);
   useEffect(() => { if (step === "exam" && left <= 0) submitRef.current(); }, [left]);
 
@@ -220,6 +238,7 @@ export default function Student() {
       <div className="card">
         <h2>{ex.title}</h2>
         <p>⏱ {ex.mins} মিনিট · {ex.mcq.length}টি MCQ · {ex.cq.length}টি CQ</p>
+        <p>🎯 পূর্ণমান: <b>{Math.round((mcqMarks(ex) + cqMarks(ex)) * 100) / 100}</b> (MCQ {mcqMarks(ex)} + CQ {cqMarks(ex)})</p>
         <div className="mut">
           <p>📷 পরীক্ষা চলাকালীন ক্যামেরা চালু থাকবে এবং নিয়মিত ছবি শিক্ষকের কাছে যাবে।</p>
           <p>🖥 পরীক্ষা ফুলস্ক্রিনে হবে। ট্যাব/অ্যাপ বদলালে স্ক্রিন লক হবে, সময় চলতেই থাকবে এবং শিক্ষক জানতে পারবেন।</p>
@@ -236,6 +255,7 @@ export default function Student() {
         <h2>🎉 পরীক্ষা জমা হয়েছে!</h2>
         <p>MCQ স্কোর: <b>{res && res.score}/{res && res.total}</b></p>
         <p>CQ ছবি: {ids.length}টি</p>
+        {res && res.cqTotal > 0 && <p className="mut">CQ-র নম্বর (পূর্ণমান {res.cqTotal}) শিক্ষক পরে দেবেন।</p>}
       </div>
     );
 
@@ -251,19 +271,22 @@ export default function Student() {
         <div className="lock">
           <h1>🚫 পরীক্ষা লক হয়েছে</h1>
           <p>আপনি পরীক্ষার স্ক্রিন ছেড়ে গিয়েছিলেন। শিক্ষককে জানানো হয়েছে।</p>
-          <div className="timer">{clock}</div>
+          <div className={"timer" + (left <= 300 ? " low" : "")}>{clock}</div>
           <p>সতর্কতা: {warns}/{MAX_WARN} — সময় চলছে!</p>
           <button onClick={backToExam}>↩ পরীক্ষায় ফিরে যান</button>
         </div>
       ) : (
         <>
-          <div className="card top"><div className="timer">{clock}</div></div>
+          <div className="card top">
+            <span className="mut">বাকি সময়</span>
+            <div className={"timer" + (left <= 300 ? " low" : "")}>{clock}</div>
+          </div>
 
           <div className="card">
             <h3>প্রথম অংশ — MCQ</h3>
             {ex.mcq.length ? ex.mcq.map((q, i) => (
               <div key={i}>
-                <b>{i + 1}. {q.q}</b>
+                <b>{i + 1}. {q.q}</b> <span className="mut">[{q.m ?? 1} নম্বর]</span>
                 {q.img && <QImg id={q.img} />}
                 {q.o.map((o, j) => (
                   <label key={j} className={"opt" + (ans[i] === j ? " on" : "")}>
@@ -279,7 +302,7 @@ export default function Student() {
             <h3>দ্বিতীয় অংশ — CQ</h3>
             {ex.cq.map((q, i) => (
               <div key={i}>
-                <p><b>{i + 1}. {q.t ?? q}</b></p>
+                <p><b>{i + 1}. {q.t ?? q}</b>{q.m ? <span className="mut"> [{q.m} নম্বর]</span> : null}</p>
                 {q.img && <QImg id={q.img} />}
               </div>
             ))}

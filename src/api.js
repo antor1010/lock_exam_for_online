@@ -15,3 +15,7 @@ export async function api(action, body = {}) {
 }
 
 export const L = ["ক", "খ", "গ", "ঘ"];
+
+const r2 = (n) => Math.round(n * 100) / 100;
+export const mcqMarks = (ex) => r2((ex.mcq || []).reduce((t, m) => t + (m.m === undefined || m.m === "" ? 1 : +m.m || 0), 0));
+export const cqMarks = (ex) => r2((ex.cq || []).reduce((t, c) => t + (+(c && c.m) || 0), 0));

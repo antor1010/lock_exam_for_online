@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, L } from "../api.js";
+import { api, L, mcqMarks, cqMarks } from "../api.js";
 import Submission from "./Submission.jsx";
 import QImg from "./QImg.jsx";
 
@@ -14,6 +14,8 @@ export default function Admin() {
   const [cq, setCq] = useState("");
   const [cqImg, setCqImg] = useState("");
   const [mcqImg, setMcqImg] = useState("");
+  const [mcqMark, setMcqMark] = useState("1");
+  const [cqMark, setCqMark] = useState("5");
   const [mcqFileKey, setMcqFileKey] = useState(0);
   const [fileKey, setFileKey] = useState(0);
   const [msg, setMsg] = useState("");
@@ -48,9 +50,12 @@ export default function Admin() {
       if (!r.id) { setMsg("❌ ছবি আপলোড হয়নি"); return; }
       img = r.id;
     }
-    await save({ ...ex, mcq: [...ex.mcq, { q, o: opts, a: correct, img }] });
+    await save({ ...ex, mcq: [...ex.mcq, { q, o: opts, a: correct, img, m: mcqMark === "" ? 1 : +mcqMark }] });
     setQ(""); setOpts(["", "", "", ""]); setMcqImg(""); setMcqFileKey((k) => k + 1);
   };
+
+  const setMark = (type, i, v) =>
+    setEx((e) => ({ ...e, [type]: e[type].map((x, j) => (j === i ? { ...(typeof x === "string" ? { t: x } : x), m: v === "" ? "" : +v } : x)) }));
 
   const removeItem = async (type, i) => {
     const item = ex[type][i];
@@ -83,7 +88,7 @@ export default function Admin() {
       if (!r.id) { setMsg("❌ ছবি আপলোড হয়নি"); return; }
       img = r.id;
     }
-    await save({ ...ex, cq: [...ex.cq, { t: cq, img }] });
+    await save({ ...ex, cq: [...ex.cq, { t: cq, img, m: cqMark === "" ? 0 : +cqMark }] });
     setCq(""); setCqImg(""); setFileKey((k) => k + 1);
   };
 
@@ -92,8 +97,21 @@ export default function Admin() {
       <div className="card">
         <h3>📝 পরীক্ষার সেটআপ</h3>
         <input value={ex.title} placeholder="পরীক্ষার নাম" onChange={(e) => setEx({ ...ex, title: e.target.value })} />
-        <input type="number" value={ex.mins} placeholder="সময় (মিনিট)" onChange={(e) => setEx({ ...ex, mins: +e.target.value || 1 })} />
-        <button onClick={() => save(ex)}>সংরক্ষণ করুন</button> {msg}
+        <p className="mut">⏱ পরীক্ষার সময় (মিনিট):</p>
+        <input type="number" min="1" value={ex.mins} placeholder="সময় (মিনিট)"
+          onChange={(e) => setEx({ ...ex, mins: e.target.value === "" ? "" : Math.max(1, +e.target.value) })} />
+        <div>
+          {[15, 30, 45, 60, 90, 120].map((m) => (
+            <button key={m} className={ex.mins === m ? "" : "g"} onClick={() => save({ ...ex, mins: m })}>{m} মি.</button>
+          ))}
+          <button className="g" onClick={() => save({ ...ex, mins: (+ex.mins || 0) + 5 })}>➕ ৫ মিনিট বাড়ান</button>
+        </div>
+        <p className="mut">চলতে থাকা পরীক্ষায় সময় বদলালে শিক্ষার্থীদের টাইমার ৩০ সেকেন্ডের মধ্যে আপডেট হবে।</p>
+        <button onClick={() => save({ ...ex, mins: +ex.mins || 30 })}>সংরক্ষণ করুন</button>{" "}
+        <button className="red" onClick={() => {
+          if (!confirm("সবার টাইমার নতুন করে শুরু হবে (নতুন পরীক্ষার জন্য)। নিশ্চিত?")) return;
+          save({ ...ex, mins: +ex.mins || 30, ver: Date.now() });
+        }}>🔄 নতুন পরীক্ষা (টাইমার রিসেট)</button> {msg}
       </div>
 
       <div className="card">
@@ -106,6 +124,8 @@ export default function Admin() {
           <input key={i} placeholder={"অপশন " + L[i]} value={v}
             onChange={(e) => setOpts(opts.map((x, j) => (j === i ? e.target.value : x)))} />
         ))}
+        <p className="mut">🎯 এই প্রশ্নের নম্বর:</p>
+        <input type="number" min="0" step="0.5" value={mcqMark} onChange={(e) => setMcqMark(e.target.value)} />
         <select value={correct} onChange={(e) => setCorrect(+e.target.value)}>
           {L.map((l, i) => <option key={i} value={i}>সঠিক উত্তর: {l}</option>)}
         </select>
@@ -115,6 +135,8 @@ export default function Admin() {
       <div className="card">
         <h3>✍️ CQ প্রশ্ন যোগ করুন</h3>
         <textarea rows="3" placeholder="CQ প্রশ্ন (লেখা)" value={cq} onChange={(e) => setCq(e.target.value)} />
+        <p className="mut">🎯 এই প্রশ্নের নম্বর:</p>
+        <input type="number" min="0" step="0.5" value={cqMark} onChange={(e) => setCqMark(e.target.value)} />
         <p className="mut">🖼 অথবা প্রশ্নের ছবি আপলোড করুন (লেখার সাথেও দেওয়া যাবে):</p>
         <input key={fileKey} type="file" accept="image/*" onChange={(e) => pickImg(e.target.files[0], setCqImg)} />
         {cqImg && <img className="qimg" src={cqImg} alt="" />}
@@ -123,15 +145,20 @@ export default function Admin() {
 
       <div className="card">
         <h3>📋 আপলোড করা প্রশ্ন ({ex.mcq.length} MCQ, {ex.cq.length} CQ)</h3>
+        <p><b>🎯 মোট পূর্ণমান: {Math.round((mcqMarks(ex) + cqMarks(ex)) * 100) / 100}</b> <span className="mut">(MCQ {mcqMarks(ex)} + CQ {cqMarks(ex)})</span></p>
         {ex.mcq.map((m, i) => (
           <div className="alert ok" key={"m" + i}>
             <span className="tag">MCQ</span>{m.q}{m.img && <QImg id={m.img} />}{" "}
+            <input type="number" min="0" step="0.5" style={{ width: 70, display: "inline-block" }} title="নম্বর"
+              value={m.m ?? 1} onChange={(e) => setMark("mcq", i, e.target.value)} onBlur={() => save(ex)} /> নম্বর{" "}
             <button className="red" onClick={() => removeItem("mcq", i)}>মুছুন</button>
           </div>
         ))}
         {ex.cq.map((m, i) => (
           <div className="alert pr" key={"c" + i}>
             <span className="tag">CQ</span>{m.t ?? m}{m.img && <QImg id={m.img} />}{" "}
+            <input type="number" min="0" step="0.5" style={{ width: 70, display: "inline-block" }} title="নম্বর"
+              value={m.m ?? 0} onChange={(e) => setMark("cq", i, e.target.value)} onBlur={() => save(ex)} /> নম্বর{" "}
             <button className="red" onClick={() => removeItem("cq", i)}>মুছুন</button>
           </div>
         ))}
