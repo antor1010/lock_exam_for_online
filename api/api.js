@@ -106,7 +106,14 @@ module.exports = async (req, res) => {
       });
       score = r2(score); total = r2(total);
       const cqTotal = r2(exam.cq.reduce((t, c) => t + (+(c && c.m) || 0), 0));
-      const sub = { id: u.id, name: u.name, score, total, cqTotal, imgs: b.imgs || [], time: new Date().toLocaleString("bn-BD", { timeZone: "Asia/Kolkata" }) };
+      // শিক্ষকের জন্য: কোন MCQ-তে শিক্ষার্থী কী বেছেছে ও সঠিক উত্তর কী (শিক্ষার্থীকে এটা পাঠানো হয় না)
+      const det = exam.mcq.map((m, i) => ({
+        q: m.q || "", o: m.o || [], img: m.img || "",
+        p: b.ans && b.ans[i] !== undefined ? b.ans[i] : null,
+        a: m.a,
+        m: m.m === undefined || m.m === "" ? 1 : +m.m || 0,
+      }));
+      const sub = { id: u.id, name: u.name, score, total, cqTotal, det, imgs: b.imgs || [], time: new Date().toLocaleString("bn-BD", { timeZone: "Asia/Kolkata" }) };
       await R("DEL", "start:" + (exam.ver || 0) + ":" + u.id); // জমা দিলে টাইমার মুছে যায়, পরেরবার নতুন করে শুরু
       await R("LPUSH", "subs", JSON.stringify(sub));
       return res.json({ score, total, cqTotal });

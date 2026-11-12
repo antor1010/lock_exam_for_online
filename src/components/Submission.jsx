@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { api } from "../api.js";
+import QImg from "./QImg.jsx";
 
 export default function Submission({ s, onDelete }) {
   const [imgs, setImgs] = useState(null);
+  const [showMcq, setShowMcq] = useState(false);
   const [cq, setCq] = useState(s.cqScore ?? "");
   const [saved, setSaved] = useState(s.cqScore !== undefined && s.cqScore !== null);
 
@@ -39,6 +41,34 @@ export default function Submission({ s, onDelete }) {
       )}
       {" · "}মোট: <b>{got}/{full}</b>
       <br />
+      {s.det && s.det.length > 0 ? (
+        <>
+          <button className="g" onClick={() => setShowMcq(!showMcq)}>
+            {showMcq ? "▲ MCQ উত্তর লুকান" : "▼ MCQ-র কোনটা ঠিক/ভুল দেখুন"}
+          </button>
+          {showMcq && (
+            <div style={{ margin: "8px 0" }}>
+              {s.det.map((d, i) => {
+                const ok = d.p === d.a;
+                const skip = d.p === null || d.p === undefined;
+                return (
+                  <div key={i} className={"alert " + (ok ? "ok" : "")} style={{ marginBottom: 6 }}>
+                    <b>{i + 1}. {ok ? "✅" : skip ? "⚪" : "❌"}</b> {d.q}
+                    {d.img && <QImg id={d.img} />}
+                    <div className="mut" style={{ marginTop: 4 }}>
+                      {skip
+                        ? "শিক্ষার্থী উত্তর দেয়নি"
+                        : <>শিক্ষার্থীর উত্তর: <b>{d.o[d.p] ?? "?"}</b></>}
+                      {!ok && <> · সঠিক উত্তর: <b>{d.o[d.a] ?? "?"}</b></>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <br />
+        </>
+      ) : null}
       {s.imgs.length === 0 ? (
         <span className="mut">ছবি নেই</span>
       ) : imgs ? (
