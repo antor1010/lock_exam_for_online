@@ -74,6 +74,9 @@ module.exports = async (req, res) => {
       // শুরুর সময় সার্ভারে সেভ — রিফ্রেশ করলেও টাইমার রিসেট হবে না
       const k = "start:" + (exam.ver || 0) + ":" + u.id;
       let t = +(await R("GET", k));
+      if (t && Date.now() - t >= (+exam.mins || 30) * 60000) {
+        return res.json({ error: "আপনার পরীক্ষার সময় আগেই শেষ হয়ে গেছে। শিক্ষকের সঙ্গে যোগাযোগ করুন।" });
+      }
       if (!t) { t = Date.now(); await R("SET", k, String(t), "EX", 60 * 60 * 24); }
       return res.json({ start: t, now: Date.now(), mins: exam.mins });
     }
@@ -105,6 +108,7 @@ module.exports = async (req, res) => {
       score = r2(score); total = r2(total);
       const cqTotal = r2(exam.cq.reduce((t, c) => t + (+(c && c.m) || 0), 0));
       const sub = { id: u.id, name: u.name, score, total, cqTotal, imgs: b.imgs || [], time: new Date().toLocaleString("bn-BD", { timeZone: "Asia/Kolkata" }) };
+      await R("DEL", "start:" + (exam.ver || 0) + ":" + u.id); // জমা দিলে টাইমার মুছে যায়, পরেরবার নতুন করে শুরু
       await R("LPUSH", "subs", JSON.stringify(sub));
       return res.json({ score, total, cqTotal });
     }
