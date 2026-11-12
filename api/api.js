@@ -74,9 +74,8 @@ module.exports = async (req, res) => {
       // শুরুর সময় সার্ভারে সেভ — রিফ্রেশ করলেও টাইমার রিসেট হবে না
       const k = "start:" + (exam.ver || 0) + ":" + u.id;
       let t = +(await R("GET", k));
-      if (t && Date.now() - t >= (+exam.mins || 30) * 60000) {
-        return res.json({ error: "আপনার পরীক্ষার সময় আগেই শেষ হয়ে গেছে। শিক্ষকের সঙ্গে যোগাযোগ করুন।" });
-      }
+      // আগের পরীক্ষার পুরনো শুরুর সময় (সময় পেরিয়ে গেছে) হলে নতুন করে শুরু হবে
+      if (t && Date.now() - t >= (+exam.mins || 30) * 60000) t = 0;
       if (!t) { t = Date.now(); await R("SET", k, String(t), "EX", 60 * 60 * 24); }
       return res.json({ start: t, now: Date.now(), mins: exam.mins });
     }
